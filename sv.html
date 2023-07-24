@@ -1,0 +1,360 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <link rel="alternate" hreflang="en" href="index.html" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Strativ AB - OpenAI API Kostnadskalkylator</title>
+    <!-- Bootstrap CSS -->
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+    <style>
+        body {
+            background-color: #f8f9fa;
+        }
+
+        /* Custom CSS for summary text */
+        .summary-text {
+            font-size: 14px;
+            color: #555;
+        }
+
+        .summary-text p {
+            margin: 0 0 4px;
+            /* Adjust the margin as needed */
+        }
+
+        .language-toggle {
+            align-items: center;
+            gap: 10px;
+            font-size: 18px;
+        }
+
+        .language-toggle a {
+            text-decoration: none;
+            color: #333;
+        }
+
+        .language-toggle a img {
+            height: 20px;
+            vertical-align: middle;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="language-toggle text-center mt-3">
+        <a href="index.html">English</a> | <a href="sv.html">Svenska</a>
+    </div>
+    <div class="container mt-4">
+        <h1 class="text-center">OpenAI API Kostnadskalkylator</h1>
+        <div class="row">
+            <div class="col-md-3">
+                <form id="dataForm">
+                    <div class="form-group">
+                        <label for="messagesInput">Antal Meddelanden:</label>
+                        <input type="number" class="form-control" id="messagesInput" min="1" max="28" value="1">
+                    </div>
+                    <div class="form-group">
+                        <label for="queryTokensInput">Förfråganstokens:</label>
+                        <input type="number" class="form-control" id="queryTokensInput" min="1" value="50">
+                    </div>
+                    <div class="form-group">
+                        <label for="fixedContextTokensInput">Fasta Kontexttokens:</label>
+                        <input type="number" class="form-control" id="fixedContextTokensInput" min="1" value="1000">
+                    </div>
+                    <div class="form-group">
+                        <label for="responseTokensInput">Svarstokens:</label>
+                        <input type="number" class="form-control" id="responseTokensInput" min="1" value="100">
+                    </div>
+                    <div class="form-group">
+                        <label for="adaCostInput">Kostnad för Ada:</label>
+                        <input type="number" class="form-control" id="adaCostInput" step="0.0001" value="0.0016">
+                    </div>
+                    <div class="form-group">
+                        <label for="babbageCostInput">Kostnad för Babbage:</label>
+                        <input type="number" class="form-control" id="babbageCostInput" step="0.0001" value="0.0024">
+                    </div>
+                    <div class="form-group">
+                        <label for="curieCostInput">Kostnad för Curie:</label>
+                        <input type="number" class="form-control" id="curieCostInput" step="0.001" value="0.012">
+                    </div>
+                    <div class="form-group">
+                        <label for="davinciCostInput">Kostnad för Davinci/GPT-4:</label>
+                        <input type="number" class="form-control" id="davinciCostInput" step="0.01" value="0.1200">
+                    </div>
+                    <div class="form-group">
+                        <label for="embeddingCostInput">Kostnad för Inbäddning av Förfråganstokens:</label>
+                        <input type="number" class="form-control" id="embeddingCostInput" step="0.0001" value="0.0001">
+                    </div>
+                    <div class="form-group">
+                        <label for="numUsersInput">Antal användare:</label>
+                        <input type="number" class="form-control" id="numUsersInput" min="1" value="1">
+                    </div>
+                </form>
+            </div>
+            <div class="col-md-7">
+                <div class="row">
+                    <div class="col-md-12">
+                        <div class="mt-4" style="height: 25vh;">
+                            <canvas id="costChart"></canvas>
+                        </div>
+                        <div id="costSummary" class="mt-2"></div>
+                    </div>
+                    <div class="col-md-12">
+                        <div class="mt-4" style="height: 25vh;">
+                            <canvas id="tokensChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+                <br><br>
+                <div id="tokensSummary" class="mt-2 summary-text"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bootstrap JS and Chart.js -->
+    <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@popperjs/core@2.9.1/dist/umd/popper.min.js"></script>
+    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <script>
+        let costChart;
+        let tokensChart;
+
+        function getDataForMessages(messages) {
+            const data = [];
+
+            for (let i = 0; i < messages; i++) {
+                const numMessages = i + 1;
+                const queryTokens = parseFloat(document.getElementById('queryTokensInput').value);
+                const fixedContextTokens = parseFloat(document.getElementById('fixedContextTokensInput').value);
+                const responseTokens = parseFloat(document.getElementById('responseTokensInput').value);
+                const adaCost = parseFloat(document.getElementById('adaCostInput').value);
+                const babbageCost = parseFloat(document.getElementById('babbageCostInput').value);
+                const curieCost = parseFloat(document.getElementById('curieCostInput').value);
+                const davinciCost = parseFloat(document.getElementById('davinciCostInput').value);
+                const embeddingCost = queryTokens * (document.getElementById('embeddingCostInput').value);
+                const numUsers = parseInt(document.getElementById('numUsersInput').value);
+                const totalTokensPerMessage = (queryTokens + responseTokens) * numUsers;
+                const adaCumulative = embeddingCost + (fixedContextTokens / 1000 + numMessages * totalTokensPerMessage / 1000) * adaCost + (data.length > 0 ? data[data.length - 1].adaCumulative : 0);
+                const babbageCumulative = embeddingCost + (fixedContextTokens / 1000 + numMessages * totalTokensPerMessage / 1000) * babbageCost + (data.length > 0 ? data[data.length - 1].babbageCumulative : 0);
+                const curieCumulative = embeddingCost + (fixedContextTokens / 1000 + numMessages * totalTokensPerMessage / 1000) * curieCost + (data.length > 0 ? data[data.length - 1].curieCumulative : 0);
+                const davinciCumulative = embeddingCost + (fixedContextTokens / 1000 + numMessages * totalTokensPerMessage / 1000) * davinciCost + (data.length > 0 ? data[data.length - 1].davinciCumulative : 0);
+
+                data.push({
+                    numMessages,
+                    totalTokensPerMessage,
+                    adaCumulative,
+                    babbageCumulative,
+                    curieCumulative,
+                    davinciCumulative
+                });
+            }
+            return data;
+        }
+
+        function getCumulativeTotalTokens(data) {
+            let cumulativeTotalTokens = 0;
+            const cumulativeData = data.map(item => {
+                cumulativeTotalTokens += item.totalTokensPerMessage;
+                return cumulativeTotalTokens;
+            });
+            return cumulativeData;
+        }
+
+        function visualizeData() {
+            const selectedMessages = parseInt(document.getElementById('messagesInput').value, 10);
+            const data = getDataForMessages(selectedMessages);
+            const labels = data.map(item => item.numMessages);
+
+            // Cost chart data
+            const adaCumulative = data.map(item => item.adaCumulative);
+            const babbageCumulative = data.map(item => item.babbageCumulative);
+            const curieCumulative = data.map(item => item.curieCumulative);
+            const davinciCumulative = data.map(item => item.davinciCumulative);
+
+            // Tokens chart data
+            const cumulativeTotalTokens = getCumulativeTotalTokens(data);
+
+            if (costChart) {
+                costChart.destroy();
+            }
+
+            if (tokensChart) {
+                tokensChart.destroy();
+            }
+
+            const ctxCost = document.getElementById('costChart').getContext('2d');
+            costChart = new Chart(ctxCost, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Ada - Ackumulerad',
+                            data: adaCumulative,
+                            borderColor: 'rgba(255, 99, 132, 1)',
+                            borderWidth: 1,
+                            fill: false
+                        },
+                        {
+                            label: 'Babbage - Ackumulerad',
+                            data: babbageCumulative,
+                            borderColor: 'rgba(54, 162, 235, 1)',
+                            borderWidth: 1,
+                            fill: false
+                        },
+                        {
+                            label: 'Curie - Ackumulerad',
+                            data: curieCumulative,
+                            borderColor: 'rgba(255, 206, 86, 1)',
+                            borderWidth: 1,
+                            fill: false
+                        },
+                        {
+                            label: 'Davinci/GPT-4 - Ackumulerad',
+                            data: davinciCumulative,
+                            borderColor: 'rgba(75, 192, 192, 1)',
+                            borderWidth: 1,
+                            fill: false
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Antal Meddelanden'
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'Kostnad i Dollar'
+                            },
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
+
+            const ctxTokens = document.getElementById('tokensChart').getContext('2d');
+            tokensChart = new Chart(ctxTokens, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: [
+                        {
+                            label: 'Kumulativa Totala Tokens',
+                            data: cumulativeTotalTokens,
+                            borderColor: 'rgba(0, 123, 255, 1)',
+                            borderWidth: 1,
+                            fill: false
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'Antal Meddelanden'
+                            }
+                        },
+                        y: {
+                            title: {
+                                display: true,
+                                text: 'Kumulativa Totala Tokens'
+                            },
+                            beginAtZero: true
+                        }
+                    }
+                }
+            });
+
+            // Update the summary text
+            // const costSummary = document.getElementById('costSummary');
+            const tokensSummary = document.getElementById('tokensSummary');
+            // costSummary.innerHTML = generateSummaryText(data);
+            tokensSummary.innerHTML = generateSummaryText(data);
+        }
+
+        function generateSummaryText(data) {
+            const lastData = data[data.length - 1];
+            const numUsers = parseInt(document.getElementById('numUsersInput').value, 10);
+
+            const summaryText = `
+                <p><strong>Sammanfattning av resultat:</strong></p>
+                <p>Kostnad för Ada: $${lastData.adaCumulative.toFixed(2)}</p>
+                <p>Kostnad för Babbage: $${lastData.babbageCumulative.toFixed(2)}</p>
+                <p>Kostnad för Curie: $${lastData.curieCumulative.toFixed(2)}</p>
+                <p>Kostnad för Davinci/GPT-4: $${lastData.davinciCumulative.toFixed(2)}</p>
+                <p>Kumulativa Totala Tokens: ${lastData.totalTokensPerMessage * data.length}</p>
+            `;
+            return summaryText;
+        }
+
+        // Event listeners
+        document.getElementById('messagesInput').addEventListener('input', function () {
+            visualizeData();
+        });
+
+        document.getElementById('queryTokensInput').addEventListener('input', function () {
+            visualizeData();
+        });
+
+        document.getElementById('fixedContextTokensInput').addEventListener('input', function () {
+            visualizeData();
+        });
+
+        document.getElementById('responseTokensInput').addEventListener('input', function () {
+            visualizeData();
+        });
+
+        document.getElementById('adaCostInput').addEventListener('input', function () {
+            visualizeData();
+        });
+
+        document.getElementById('babbageCostInput').addEventListener('input', function () {
+            visualizeData();
+        });
+
+        document.getElementById('curieCostInput').addEventListener('input', function () {
+            visualizeData();
+        });
+
+        document.getElementById('davinciCostInput').addEventListener('input', function () {
+            visualizeData();
+        });
+
+        document.getElementById('embeddingCostInput').addEventListener('input', function () {
+            visualizeData();
+        });
+
+        document.getElementById('numUsersInput').addEventListener('input', function () {
+            visualizeData();
+        });
+
+        // Initial visualization
+        visualizeData();
+
+    </script>
+    <footer class="text-white text-center mt-5 p-5">
+        <div class="container py-12 text-mint">
+            <svg width="151" height="28" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path
+                    d="M137.372 27.997c-.361-.085-.725-.166-1.086-.26-1.967-.526-3.066-1.872-3.531-3.795-1.769-7.3-3.539-14.603-5.312-21.908-.069-.283-.145-.566-.204-.852-.118-.575.073-.835.656-.848.787-.02 1.577 0 2.364 0h2.41c.745 0 .948.163 1.109.894l1.79 8.23c.925 4.236 1.852 8.469 2.781 12.7a1.1 1.1 0 0 0 .328.578c.301.26.655.039.773-.48.305-1.33.594-2.662.882-3.994 1.251-5.709 2.5-11.418 3.748-17.128.145-.65.328-.803 1.01-.803h4.591c.908 0 1.066.189.859 1.043-.99 4.084-1.984 8.168-2.981 12.254-.832 3.438-1.667 6.876-2.505 10.314-.577 2.365-1.911 3.574-4.341 3.96a1.36 1.36 0 0 0-.272.098l-3.069-.003ZM.003 6.238c.086-.376.168-.753.253-1.127.452-1.998 1.708-3.308 3.56-4.127A12.558 12.558 0 0 1 8.602.01c2.767-.06 5.534.17 8.253.683.23.016.454.081.656.191.202.139.343.35.393.589.037 1.234.023 2.47 0 3.704 0 .48-.18.65-.655.62-1.64-.094-3.302-.246-4.955-.298a50.364 50.364 0 0 0-4.318.048c-.352.01-.69.14-.955.368-.266.228-.444.54-.505.883-.18.8-.045 1.55.68 2.041.724.49 1.514.975 2.294 1.404 1.446.796 2.922 1.54 4.362 2.35.722.413 1.42.868 2.092 1.36 3.836 2.772 4.18 10.558-1.856 13.037-1.033.423-2.165.608-3.247.904-.108.029-.21.068-.328.104h-4.6c-.17-.036-.328-.078-.515-.107-1.272-.228-2.55-.43-3.817-.683-.603-.12-.74-.354-.744-.975v-3.265c0-.624.233-.813.85-.77 2.042.146 4.085.305 6.128.415.72.03 1.442.003 2.157-.084.935-.098 1.64-.533 1.899-1.501.26-.969.197-1.95-.682-2.662-.472-.377-.97-.722-1.489-1.033-2.042-1.235-4.128-2.401-6.138-3.685-1.784-1.14-3.02-2.723-3.407-4.874C.111 8.54.052 8.305 0 8.068l.003-1.83ZM60.895 16.48l2.295 4.209 3.237 5.962c.073.127.134.26.183.397.128.377-.023.634-.413.65-1.951 0-3.905.023-5.856-.023-.217 0-.489-.344-.623-.588-1.01-1.859-1.987-3.734-2.978-5.602-.616-1.163-1.24-2.323-1.846-3.493a.528.528 0 0 0-.57-.325c-.866.022-1.728 0-2.653 0v8.962c0 .864-.203 1.062-1.066 1.066h-4.344c-.702 0-.938-.238-.938-.936V2.225c0-1.04.259-1.433 1.292-1.624A20.837 20.837 0 0 1 49.487.24C51.402.136 53.32.032 55.235.045c2.053 0 4.09.267 5.991 1.13 2.797 1.275 4.24 3.481 4.436 6.5.137 1.296.06 2.605-.229 3.876-.587 2.207-2.03 3.698-4.033 4.715-.145.052-.279.114-.505.215ZM51.658 5.453v6.75c0 .324.2.37.442.366 1.378-.02 2.758.023 4.125-.087 1.99-.163 2.916-1.06 3.148-2.857.282-2.219-.511-3.509-2.524-4.039-1.699-.435-3.417-.21-5.191-.133ZM89.885 27.694h-2.263c-.787 0-.957-.14-1.128-.916l-1.397-6.42c-1.051-4.82-2.105-9.64-3.16-14.46-.07-.326-.138-.68-.581-.65-.394.016-.466.324-.535.65a41597.335 41597.335 0 0 1-4.623 21.101.777.777 0 0 1-.296.54.793.793 0 0 1-.6.162c-1.573-.023-3.147 0-4.724 0-.866 0-1.014-.189-.807-1.027.636-2.617 1.275-5.234 1.915-7.85 1.187-4.888 2.372-9.777 3.554-14.669.617-2.528 2.138-3.805 4.742-4.061a11.82 11.82 0 0 1 3.958.204c1.967.478 3.105 1.794 3.567 3.695 1.85 7.569 3.69 15.14 5.519 22.71.187.77 0 .995-.826.998l-2.316-.007ZM28.41 5.51h-5.808c-.797 0-1.01-.217-1.01-1.023v-3.22c0-.676.236-.936.902-.936h18.113c.695 0 .938.267.938.952v3.27c0 .714-.24.954-.984.954H34.741v21.09c0 .89-.197 1.085-1.092 1.088h-4.23c-.8 0-1.01-.211-1.01-1.017V5.51ZM106.441 5.51v21.174c0 .813-.197 1.008-1.007 1.01h-4.332c-.747 0-.96-.207-.96-.951V6.206c0-.692 0-.692-.682-.692H94.34c-.816 0-1.036-.214-1.04-1.004V1.339c0-.77.23-1.005.984-1.005h17.989c.764 0 .984.238.984.975v3.123c0 .877-.197 1.07-1.109 1.07h-5.708v.009ZM123.367 13.95v12.73c0 .816-.197 1.011-1.004 1.014h-4.38c-.751 0-.948-.201-.951-.958-.004-.757 0-1.596 0-2.392V1.416c0-.975.108-1.088 1.098-1.088h4.282c.794 0 .955.159.955.935V13.95Z"
+                    fill="#FF5A00"></path>
+            </svg>
+        </div>
+    </footer>
+</body>
+
+</html>
